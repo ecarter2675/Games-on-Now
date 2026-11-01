@@ -63,6 +63,24 @@ h2 .dot{width:9px;height:9px;border-radius:50%;background:var(--live);animation:
 .empty{color:var(--muted);background:var(--card);border:1px dashed var(--line);border-radius:10px;padding:14px}
 .err{color:var(--live)}
 .note{color:var(--muted);font-size:.8rem}
+.views{display:grid;grid-template-columns:1fr 1fr;background:var(--chip);border-radius:10px;padding:4px;gap:4px}
+.view{font:700 1rem var(--display);text-transform:uppercase;letter-spacing:.06em;border:none;background:none;color:var(--muted);padding:8px;border-radius:7px;cursor:pointer}
+.view[aria-pressed="true"]{background:var(--card);color:var(--fg);box-shadow:0 1px 2px rgba(0,0,0,.12)}
+#standings{display:flex;flex-direction:column;gap:14px}
+#standings[hidden]{display:none}
+.tbl-wrap{overflow-x:auto;background:var(--card);border:1px solid var(--line);border-radius:10px}
+table.st-t{width:100%;border-collapse:collapse;font-size:.9rem;font-variant-numeric:tabular-nums}
+.st-t caption{text-align:left;font:700 .95rem var(--display);text-transform:uppercase;letter-spacing:.06em;padding:10px 12px 4px;color:var(--muted)}
+.st-t th,.st-t td{padding:7px 8px;text-align:right;white-space:nowrap;border-top:1px solid var(--line)}
+.st-t th{font-weight:600;color:var(--muted);font-size:.78rem;border-top:none}
+.st-t th:nth-child(2),.st-t td:nth-child(2){text-align:left;width:100%}
+.st-t td:first-child,.st-t th:first-child{color:var(--muted);width:1.5em;padding-left:12px}
+.st-t td:last-child,.st-t th:last-child{padding-right:12px}
+.st-t .tm{display:flex;align-items:center;gap:8px;font-weight:600}
+.st-t .tm img{width:20px;height:20px;object-fit:contain}
+.st-t .tm .ab{display:none}
+@media (max-width:420px){.st-t .tm .full{display:none}.st-t .tm .ab{display:inline}}
+.st-t tr.cut td{border-top:2px solid var(--muted)}
 </style>
 </head>
 <body>
@@ -71,6 +89,11 @@ h2 .dot{width:9px;height:9px;border-radius:50%;background:var(--live);animation:
     <h1>Games On Now</h1>
     <span class="updated" id="updated">Loading…</span>
   </header>
+
+  <div class="views" role="group" aria-label="View">
+    <button class="view" id="v-games" data-view="games" aria-pressed="true">Games</button>
+    <button class="view" id="v-stand" data-view="standings" aria-pressed="false">Standings</button>
+  </div>
 
   <div class="bar" role="group" aria-label="League">
     <button class="tab" id="t-all" data-lg="ALL" aria-pressed="true">All</button>
@@ -86,6 +109,7 @@ h2 .dot{width:9px;height:9px;border-radius:50%;background:var(--live);animation:
   </details>
 
   <main id="out"></main>
+  <section id="standings" hidden></section>
   <p class="note">Scores and TV listings from ESPN, refreshed every minute. National broadcasts are listed first. Local channels (like a team's regional sports network) depend on where you live, and out-of-market games are usually on the league's own package.</p>
 </div>
 
@@ -285,12 +309,109 @@ function buildApps(){
   });
 }
 
+// ---------- Standings ----------
+// Lines drawn under the last playoff spot (and NBA play-in) in each conference/league.
+const CUTS = {NBA:[6,10], NFL:[7], MLB:[6]};
+const standCache = {}; // league -> {at, groups}
+
+async function fetchStandings(L){
+  const c = standCache[L.id];
+  if (c && Date.now()-c.at < 10*60*1000) return c.groups;
+  const r = await fetch(`https://site.api.espn.com/apis/v2/sports/${L.path}/standings`);
+  if (!r.ok) throw new Error(L.id+" "+r.status);
+  const j = await r.json();
+  const parts = (j.children && j.children.length) ? j.children : [j];
+  const groups = parts.map(p => {
+    const entries = (p.standings?.entries||[]).map(e => {
+      const s = {};
+      for (const x of (e.stats||[])) { s[x.name||x.type] = x; if (x.abbreviation) s["abbr:"+x.abbreviation] = x; }
+      const dv = k => s[k]?.displayValue ?? (s[k]?.value!=null ? String(s[k].value) : "");
+      const num = k => s[k]?.value != null ? Number(s[k].value) : NaN;
+      return {
+        name: e.team?.shortDisplayName || e.team?.displayName || e.team?.name || "",
+        abbr: e.team?.abbreviation || "",
+        logo: e.team?.logos?.[0]?.href || "",
+        w: dv("wins"), l: dv("losses"), t: dv("ties"),
+        pct: dv("winPercent"), gb: dv("gamesBehind"), strk: dv("streak"),
+        seed: num("playoffSeed"), wp: num("winPercent"), wins: num("wins"),
+      };
+    });
+    const seeded = entries.length && entries.every(e => e.seed > 0);
+    entries.sort((a,b) => seeded ? a.seed-b.seed : (b.wp-a.wp) || (b.wins-a.wins));
+    return {name: p.name || p.abbreviation || L.id, entries};
+  });
+  standCache[L.id] = {at: Date.now(), groups};
+  return groups;
+}
+
+function standTable(L, g){
+  const wrap = el("div","tbl-wrap");
+  const t = el("table","st-t");
+  const cap = el("caption",null,g.name); t.append(cap);
+  const hasT = L.id==="NFL", hasGB = L.id!=="NFL" && g.entries.some(e=>e.gb);
+  const cols = ["#","Team","W","L"].concat(hasT?["T"]:[], ["PCT"], hasGB?["GB"]:[], ["STRK"]);
+  const thead = el("thead"); const hr = el("tr");
+  cols.forEach(c=>{const th=el("th",null,c); th.scope="col"; hr.append(th)}); thead.append(hr); t.append(thead);
+  const tb = el("tbody");
+  const cuts = CUTS[L.id]||[];
+  g.entries.forEach((e,i)=>{
+    const tr = el("tr", cuts.includes(i) ? "cut" : null);
+    tr.append(el("td",null,String(i+1)));
+    const td = el("td"); const tm = el("span","tm");
+    if (e.logo){const img=el("img"); img.src=e.logo; img.alt=""; img.loading="lazy"; img.onerror=()=>img.remove(); tm.append(img)}
+    tm.append(el("span","full",e.name), el("span","ab",e.abbr||e.name)); td.append(tm); tr.append(td);
+    tr.append(el("td",null,e.w), el("td",null,e.l));
+    if (hasT) tr.append(el("td",null,e.t||"0"));
+    tr.append(el("td",null,e.pct));
+    if (hasGB) tr.append(el("td",null,e.gb));
+    tr.append(el("td",null,e.strk));
+    tb.append(tr);
+  });
+  t.append(tb); wrap.append(t);
+  return wrap;
+}
+
+async function renderStandings(){
+  const box = document.getElementById("standings");
+  const leagues = LEAGUES.filter(L => league==="ALL" || L.id===league);
+  box.replaceChildren(el("div","empty","Loading standings…"));
+  const results = await Promise.allSettled(leagues.map(fetchStandings));
+  if (view!=="standings") return;
+  box.replaceChildren();
+  results.forEach((r,i)=>{
+    const L = leagues[i];
+    if (leagues.length>1) box.append(el("h2",null,L.id));
+    if (r.status!=="fulfilled" || !r.value.some(g=>g.entries.length)){
+      box.append(el("div","empty",`Couldn't load ${L.id} standings. Tap Refresh to try again.`)); return;
+    }
+    r.value.forEach(g=>{ if (g.entries.length) box.append(standTable(L,g)) });
+  });
+  const lines = leagues.map(L => L.id==="NBA" ? "NBA: line under 6th = playoffs, under 10th = play-in" : `${L.id}: line under ${CUTS[L.id][0]}th = playoff spot`);
+  box.append(el("p","note","Lines mark the playoff cutoff. "+lines.join(". ")+"."));
+}
+
+let view = store.get("gon.view","games");
+function setView(v){
+  view = v; store.set("gon.view",v);
+  document.querySelectorAll(".view").forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.view===v)));
+  document.getElementById("out").hidden = v!=="games";
+  document.getElementById("apps").hidden = v!=="games";
+  document.getElementById("standings").hidden = v!=="standings";
+  if (v==="standings") renderStandings();
+}
+document.querySelectorAll(".view").forEach(b=> b.onclick=()=>setView(b.dataset.view));
+
 document.querySelectorAll(".tab").forEach(b=>{
   b.setAttribute("aria-pressed", String(b.dataset.lg===league));
   b.onclick=()=>{league=b.dataset.lg; store.set("gon.league",league);
-    document.querySelectorAll(".tab").forEach(x=>x.setAttribute("aria-pressed",String(x===b))); render()};
+    document.querySelectorAll(".tab").forEach(x=>x.setAttribute("aria-pressed",String(x===b)));
+    view==="standings" ? renderStandings() : render()};
 });
-document.getElementById("refresh").onclick=load;
+document.getElementById("refresh").onclick=()=>{
+  if (view==="standings"){ for (const k in standCache) delete standCache[k]; renderStandings(); }
+  load();
+};
+setView(view);
 buildApps();
 load();
 setInterval(load, 60000);
