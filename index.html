@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Games On Now</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600&display=swap">
+<style>
+/* Layout: a TV-guide column. Sticky league filter, then Live / Later today / Final groups of game rows. */
+:root{
+  --bg:#f3f4f6; --card:#ffffff; --fg:#14171c; --muted:#5c6470; --line:#dfe2e7;
+  --live:#d72631; --accent:#1f5fd1; --chip:#eef1f6; --have:#e3f4e8; --have-fg:#17663a;
+  --display:"Barlow Condensed","Arial Narrow",system-ui,sans-serif;
+  --body:"Barlow",system-ui,-apple-system,"Segoe UI",sans-serif;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#0f1216; --card:#181c22; --fg:#eceef2; --muted:#98a0ac; --line:#2a3038;
+  --live:#ff4b55; --accent:#6aa0ff; --chip:#232831; --have:#173322; --have-fg:#7fdc9f;
+  color-scheme:dark;
+}}
+*{box-sizing:border-box}
+html{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.4 var(--body);
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.wrap{max-width:760px;margin:0 auto;padding-block:20px 48px;display:flex;flex-direction:column;gap:18px}
+header{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:8px}
+h1{font:700 2rem/1 var(--display);letter-spacing:.01em;margin:0;text-transform:uppercase}
+.updated{color:var(--muted);font-size:.85rem}
+.bar{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--bg);padding-block:8px;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.tab{font:600 .95rem var(--body);border:1px solid var(--line);background:var(--card);color:var(--fg);padding:7px 14px;border-radius:999px;cursor:pointer}
+.tab[aria-pressed="true"]{background:var(--fg);color:var(--bg);border-color:var(--fg)}
+.tab:focus-visible,button:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.refresh{margin-left:auto;font:500 .9rem var(--body);background:none;border:none;color:var(--accent);cursor:pointer;padding:6px}
+details.apps{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 14px}
+details.apps summary{cursor:pointer;font-weight:600}
+.applist{display:flex;flex-wrap:wrap;gap:8px 14px;margin-top:10px}
+.applist label{display:flex;gap:6px;align-items:center;font-size:.92rem}
+h2{font:700 1.15rem/1 var(--display);text-transform:uppercase;letter-spacing:.06em;margin:6px 0 0;display:flex;align-items:center;gap:8px}
+h2 .dot{width:9px;height:9px;border-radius:50%;background:var(--live);animation:pulse 1.6s infinite}
+@keyframes pulse{50%{opacity:.35}}
+@media (prefers-reduced-motion:reduce){h2 .dot{animation:none}}
+.list{display:flex;flex-direction:column;gap:8px}
+.game{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 14px;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px 12px}
+.game.is-live{border-left:4px solid var(--live)}
+.teams{display:flex;flex-direction:column;gap:3px;min-width:0}
+.team{display:flex;align-items:center;gap:8px;min-width:0}
+.team img{width:22px;height:22px;object-fit:contain;flex:none}
+.team .nm{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.team .sc{margin-left:auto;font:700 1.25rem/1 var(--display);font-variant-numeric:tabular-nums}
+.team.lose .nm,.team.lose .sc{color:var(--muted)}
+.side{text-align:right;display:flex;flex-direction:column;gap:4px;align-items:flex-end}
+.lg{font:700 .75rem var(--display);letter-spacing:.1em;color:var(--muted)}
+.st{font-size:.85rem;color:var(--muted);white-space:nowrap}
+.is-live .st{color:var(--live);font-weight:600}
+.watch{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:6px;padding-top:6px;border-top:1px dashed var(--line)}
+.w{font-size:.82rem;background:var(--chip);border-radius:6px;padding:3px 8px;display:inline-flex;gap:5px;align-items:baseline}
+.w b{font-weight:600}
+.w span{color:var(--muted)}
+.w.have{background:var(--have);color:var(--have-fg)}
+.w.have span{color:inherit;opacity:.85}
+.empty{color:var(--muted);background:var(--card);border:1px dashed var(--line);border-radius:10px;padding:14px}
+.err{color:var(--live)}
+.note{color:var(--muted);font-size:.8rem}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Games On Now</h1>
+    <span class="updated" id="updated">Loading…</span>
+  </header>
+
+  <div class="bar" role="group" aria-label="League">
+    <button class="tab" id="t-all" data-lg="ALL" aria-pressed="true">All</button>
+    <button class="tab" id="t-nba" data-lg="NBA" aria-pressed="false">NBA</button>
+    <button class="tab" id="t-nfl" data-lg="NFL" aria-pressed="false">NFL</button>
+    <button class="tab" id="t-mlb" data-lg="MLB" aria-pressed="false">MLB</button>
+    <button class="refresh" id="refresh">Refresh</button>
+  </div>
+
+  <details class="apps" id="apps">
+    <summary>My apps (highlights games you can already watch)</summary>
+    <div class="applist" id="applist"></div>
+  </details>
+
+  <main id="out"></main>
+  <p class="note">Scores and TV listings from ESPN, refreshed every minute. National broadcasts are listed first. Local channels (like a team's regional sports network) depend on where you live, and out-of-market games are usually on the league's own package.</p>
+</div>
+
+<script>
+const LEAGUES = [
+  {id:"NBA", path:"basketball/nba", pkg:"NBA League Pass"},
+  {id:"NFL", path:"football/nfl",   pkg:"NFL Sunday Ticket (YouTube)"},
+  {id:"MLB", path:"baseball/mlb",   pkg:"MLB.TV"},
+];
+
+// Channel -> streaming app. Matched case-insensitively against the start of the network name.
+const APP_RULES = [
+  [/^abc$/i, "ESPN app / Disney+"],
+  [/^espn ?(2|u|news)?$|^espn ?deportes|^sec ?network|^acc ?network/i, "ESPN app"],
+  [/^espn\+|^espn ?plus|^espn unlimited/i, "ESPN app"],
+  [/^tnt|^tbs|^trutv/i, "HBO Max"],
+  [/^nbc$|^nbcsn|^peacock|^usa( network)?$/i, "Peacock"],
+  [/^cbs$|^paramount|^cbssn|^cbs sports/i, "Paramount+"],
+  [/^fox$|^fs1|^fs2|^fox sports|^fox deportes/i, "Fox One"],
+  [/^prime|^amazon/i, "Prime Video"],
+  [/^netflix/i, "Netflix"],
+  [/^apple/i, "Apple TV"],
+  [/^youtube/i, "YouTube"],
+  [/^nfl ?(network|net|\+)/i, "NFL+"],
+  [/^nba ?tv/i, "NBA app"],
+  [/^nba league pass/i, "NBA app"],
+  [/^mlb ?(network|net)/i, "MLB app"],
+  [/^mlb\.?tv/i, "MLB app"],
+  [/^roku/i, "Roku Channel"],
+];
+const ALL_APPS = ["ESPN app","HBO Max","Peacock","Paramount+","Fox One","Prime Video","Netflix","Apple TV","YouTube","NFL+","NBA app","MLB app","NBA League Pass","MLB.TV","NFL Sunday Ticket (YouTube)","Local RSN app"];
+
+function appFor(name){
+  const n = String(name||"").trim();
+  for (const [re, app] of APP_RULES) if (re.test(n)) return app;
+  if (/sports ?net|sportsnet|^fdsn|fanduel|bally|msg|nesn|yes$|marquee|spectrum|root|altitude|mass ?mutual|space city|monumental|chsn|kjzz|nbc sports (bay|bos|chi|phi|cal)|sny|masn|bsn|rsn/i.test(n)) return "Local RSN app";
+  return null;
+}
+
+const store = {
+  get(k,d){try{const v=localStorage.getItem(k);return v==null?d:JSON.parse(v)}catch{return d}},
+  set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch{}}
+};
+let league = store.get("gon.league","ALL");
+let myApps = new Set(store.get("gon.apps",[]));
+let lastGames = [];
+
+function ymd(d){return d.getFullYear()+String(d.getMonth()+1).padStart(2,"0")+String(d.getDate()).padStart(2,"0")}
+
+async function fetchLeague(L){
+  const now = new Date();
+  const days = [ymd(now)];
+  if (now.getHours() < 5) { const y = new Date(now); y.setDate(y.getDate()-1); days.unshift(ymd(y)); } // late games after midnight
+  const out = [];
+  for (const day of days){
+    const r = await fetch(`https://site.api.espn.com/apis/site/v2/sports/${L.path}/scoreboard?dates=${day}`);
+    if (!r.ok) throw new Error(L.id+" "+r.status);
+    const j = await r.json();
+    for (const e of (j.events||[])) out.push(parseEvent(e, L));
+  }
+  return out;
+}
+
+function parseEvent(e, L){
+  const c = (e.competitions||[])[0] || {};
+  const st = (c.status||e.status||{}).type || {};
+  const teams = (c.competitors||[]).slice().sort((a,b)=> (a.homeAway==="away"?-1:1) - (b.homeAway==="away"?-1:1)).map(t=>({
+    name: t.team?.shortDisplayName || t.team?.displayName || t.team?.name || "TBD",
+    abbr: t.team?.abbreviation || "",
+    logo: t.team?.logo || "",
+    score: t.score,
+    winner: !!t.winner,
+    home: t.homeAway==="home",
+  }));
+  // Collect channels: national first, then local.
+  const seen = new Map();
+  const add = (name, scope) => {
+    name = String(name||"").trim(); if (!name) return;
+    const key = name.toLowerCase();
+    const prev = seen.get(key);
+    if (!prev || (prev.scope!=="National" && scope==="National")) seen.set(key,{name,scope});
+  };
+  for (const g of (c.geoBroadcasts||[])){
+    const m = g.market?.type || "";
+    add(g.media?.shortName || g.media?.name, /national/i.test(m) ? "National" : (m==="Home"?"Home":m==="Away"?"Away":"Local"));
+  }
+  for (const b of (c.broadcasts||[])){
+    const m = b.market || "";
+    for (const n of (b.names||[])) add(n, /national/i.test(m)?"National":(/home/i.test(m)?"Home":/away/i.test(m)?"Away":"Local"));
+  }
+  if (!seen.size && c.broadcast) add(c.broadcast, "National");
+  const order = {National:0, Home:1, Away:2, Local:3};
+  const channels = [...seen.values()].sort((a,b)=>order[a.scope]-order[b.scope]);
+  const homeAbbr = teams.find(t=>t.home)?.abbr, awayAbbr = teams.find(t=>!t.home)?.abbr;
+  const watch = channels.map(ch => ({
+    channel: ch.name,
+    app: appFor(ch.name),
+    where: ch.scope==="Home" ? `${homeAbbr} area` : ch.scope==="Away" ? `${awayAbbr} area` : ch.scope==="Local" ? "local" : "",
+  }));
+  // If nothing national, the league package is the usual out-of-market option.
+  if (!channels.some(c=>c.scope==="National")) watch.push({channel:L.pkg, app:L.pkg, where:"out of market", pkg:true});
+  return {
+    id: e.id, league: L.id, date: new Date(e.date),
+    state: st.state || "pre", detail: st.shortDetail || st.detail || "",
+    teams, watch,
+  };
+}
+
+function el(tag, cls, text){const n=document.createElement(tag); if(cls) n.className=cls; if(text!=null) n.textContent=text; return n}
+
+function gameCard(g){
+  const card = el("article","game"+(g.state==="in"?" is-live":""));
+  const teams = el("div","teams");
+  const showScore = g.state!=="pre";
+  const decided = g.state==="post" && g.teams.some(t=>t.winner);
+  for (const t of g.teams){
+    const row = el("div","team"+(decided && !t.winner?" lose":""));
+    if (t.logo){const img=el("img"); img.src=t.logo; img.alt=""; img.loading="lazy"; img.onerror=()=>img.remove(); row.append(img)}
+    row.append(el("span","nm",(t.home?"":"")+t.name));
+    if (showScore && t.score!=null) row.append(el("span","sc",t.score));
+    teams.append(row);
+  }
+  const side = el("div","side");
+  side.append(el("span","lg",g.league));
+  const when = g.state==="pre" ? g.date.toLocaleTimeString([], {hour:"numeric", minute:"2-digit"}) : g.detail;
+  side.append(el("span","st",when));
+  card.append(teams, side);
+  const w = el("div","watch");
+  if (!g.watch.length) w.append(el("span","w","No TV listing yet"));
+  for (const x of g.watch){
+    const have = x.app && myApps.has(x.app);
+    const chip = el("span","w"+(have?" have":""));
+    const b = el("b",null, x.pkg ? x.channel : (x.app && x.app!==x.channel ? `${x.channel} → ${x.app}` : x.channel));
+    chip.append(b);
+    if (x.where) chip.append(el("span",null,x.where));
+    if (have) chip.title = "You have this app";
+    w.append(chip);
+  }
+  card.append(w);
+  return card;
+}
+
+function render(){
+  const out = document.getElementById("out");
+  out.replaceChildren();
+  const games = lastGames.filter(g => league==="ALL" || g.league===league);
+  const groups = [
+    ["in", "Live now"],
+    ["pre", "Later today"],
+    ["post", "Final"],
+  ];
+  const box = el("div"); box.style.cssText="display:flex;flex-direction:column;gap:14px";
+  let any=false;
+  for (const [state,label] of groups){
+    const gs = games.filter(g=>g.state===state).sort((a,b)=>a.date-b.date);
+    if (state==="post" && !gs.length) continue;
+    const h = el("h2"); if (state==="in"){h.append(el("span","dot"))} h.append(label+(gs.length?` (${gs.length})`:""));
+    box.append(h);
+    const list = el("div","list");
+    if (!gs.length) list.append(el("div","empty", state==="in" ? "Nothing on right now." : "No more games today."));
+    gs.forEach(g=>{list.append(gameCard(g)); any=true});
+    box.append(list);
+  }
+  out.append(box);
+  if (!any && !lastGames.length) {
+    // nothing at all today
+  }
+}
+
+let loading=false;
+async function load(){
+  if (loading) return; loading=true;
+  const up = document.getElementById("updated");
+  up.textContent = "Updating…";
+  const results = await Promise.allSettled(LEAGUES.map(fetchLeague));
+  const games=[], failed=[];
+  results.forEach((r,i)=> r.status==="fulfilled" ? games.push(...r.value) : failed.push(LEAGUES[i].id));
+  // Dedupe (yesterday+today overlap), and drop yesterday's games unless still live.
+  const today = ymd(new Date()); const map = new Map();
+  for (const g of games){ if (ymd(g.date)!==today && g.state!=="in") continue; map.set(g.league+g.id, g) }
+  if (failed.length===LEAGUES.length){
+    up.innerHTML=""; up.append(el("span","err","Couldn't reach the scores feed. Check your connection and tap Refresh."));
+  } else {
+    lastGames=[...map.values()];
+    up.textContent = "Updated " + new Date().toLocaleTimeString([], {hour:"numeric",minute:"2-digit"}) + (failed.length?` · ${failed.join(", ")} unavailable`:"");
+    render();
+  }
+  loading=false;
+}
+
+function buildApps(){
+  const list=document.getElementById("applist");
+  ALL_APPS.forEach((a,i)=>{
+    const lab=el("label"); const cb=el("input"); cb.type="checkbox"; cb.id="app-"+i; cb.checked=myApps.has(a);
+    cb.onchange=()=>{cb.checked?myApps.add(a):myApps.delete(a); store.set("gon.apps",[...myApps]); render()};
+    lab.append(cb, document.createTextNode(a)); list.append(lab);
+  });
+}
+
+document.querySelectorAll(".tab").forEach(b=>{
+  b.setAttribute("aria-pressed", String(b.dataset.lg===league));
+  b.onclick=()=>{league=b.dataset.lg; store.set("gon.league",league);
+    document.querySelectorAll(".tab").forEach(x=>x.setAttribute("aria-pressed",String(x===b))); render()};
+});
+document.getElementById("refresh").onclick=load;
+buildApps();
+load();
+setInterval(load, 60000);
+document.addEventListener("visibilitychange",()=>{ if(!document.hidden) load() });
+</script>
+</body>
+</html>
